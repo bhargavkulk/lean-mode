@@ -4,7 +4,7 @@
 
 This is my shitty =lean-mode=.
 Does not support =info-view= yet.
-I should probably implement this soon.
+I should probably implement that soon.
 Supports everything that is supported by LSP, so things like code completion, navigation, code
 actions, etc.
 all work pretty well.
@@ -26,7 +26,7 @@ Following is with elpaca
   (use-package lean-mode
     :ensure (:host github
              :repo "bhargavkulk/lean-mode"
-             :files (:defaults "data/*.json")))
+             :files (:defaults ("data" "data/*.json"))))
 #+end_src
 
 * Input Method
