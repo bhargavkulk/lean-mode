@@ -1,0 +1,18 @@
+#+title: =lean-mode=
+#+author: Bhargav Kulkarni
+#+date: [2026-08-19 Wed]
+
+This is my shitty =lean-mode=.
+Does not support =info-view= yet.
+I should probably implement this soon.
+Supports everything that is supported by LSP, so things like code completion, navigation, code
+actions, etc.
+all work pretty well.
+Sometimes a lean document may just hang.
+I don't know what causes this but if you come across this, then please try to reproduce and make a
+issue in this repo.
+
+* Why another =lean-mode=
+
+I don't like any of the existing ones, they have crazy unneeded dependencies or they don't have a
+static info view.
