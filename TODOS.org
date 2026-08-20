@@ -1,0 +1,5 @@
+- [ ] figure out licensing
+- [ ] add info-view
+- [ ] advertise on social media and zulip
+- [ ] figure out what causes the lag
+- [ ] interactive info-view
