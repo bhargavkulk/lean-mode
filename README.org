@@ -12,6 +12,30 @@ Sometimes a lean document may just hang.
 I don't know what causes this but if you come across this, then please try to reproduce and make a
 issue in this repo.
 
+* Requirements
+
+- Emacs 29.1 or newer;
+- Eglot (included with Emacs 29+); and
+- a Lean project using Lake, with ~lake~ available on ~PATH~.
+
+* Installation
+
+Following is with elpaca
+
+#+begin_src elisp
+  (use-package lean-mode
+    :ensure (:host github
+             :repo "bhargavkulk/lean-mode"
+             :files (:defaults "data/*.json")))
+#+end_src
+
+* Input Method
+
+The input method is named =Lean=.
+For example, typing =\alpha= produces =α=.
+Use =M-x set-input-method RET Lean= to activate it manually.
+When active you should see a =∀= in the modeline as the input method symbol.
+
 * Why another =lean-mode=
 
 I don't like any of the existing ones, they have crazy unneeded dependencies or they don't have a

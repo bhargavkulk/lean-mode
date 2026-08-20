@@ -264,7 +264,7 @@ Use customisable variables and parent input methods to setup Lean input method."
   ;; Create (or reset) the input method.
   (with-temp-buffer
     (quail-define-package
-     "Lean" "UTF-8" "∏" t ; guidance
+     "Lean" "UTF-8" "∀" t ; guidance
      "Lean input method.
 The purpose of this input method is to edit Lean programs, but
 since it is highly customisable it can be made useful for other
@@ -273,7 +273,7 @@ tasks as well."
      ))
 
   (lean-input-add-translations (mapcar (lambda (tr) (cons (car tr) (vconcat (cdr tr))))
-                                        lean-input-user-translations))
+                                       lean-input-user-translations))
   (with-temp-buffer
     (insert-file-contents (expand-file-name
                            "abbreviations.json"
@@ -291,7 +291,7 @@ tasks as well."
       lean-input-add-translations))
   (dolist (def lean-input-inherit)
     (lean-input-inherit-package (car def)
-                                 (eval (cdr def)))))
+                                (eval (cdr def)))))
 
 (defun lean-input-incorporate-changed-setting (sym val)
   "Update the Lean input method.
