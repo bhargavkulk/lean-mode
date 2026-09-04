@@ -69,7 +69,9 @@
               second)
           (setq second (lean-info--ensure-buffer))
           (should (eq first second))
-          (should (equal (buffer-name first) "*Lean Info*")))
+          (should (equal (buffer-name first) "*Lean Info*"))
+          (with-current-buffer first
+            (should-not cursor-type)))
       (when (buffer-live-p lean-info--buffer)
         (kill-buffer lean-info--buffer)))))
 

@@ -23,6 +23,7 @@
 
 (define-derived-mode lean-info-mode special-mode "Lean Info"
   "Major mode for displaying plain Lean goals."
+  (setq-local cursor-type nil)
   (setq-local font-lock-defaults lean-info-font-lock-defaults)
   (font-lock-mode 1))
 
