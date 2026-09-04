@@ -33,6 +33,15 @@
   "Return the Info View buffer name for SOURCE."
   (format "*Lean Info: %s*" (buffer-name source)))
 
+(defun lean-info--goal-text (result)
+  "Return plain goal text from a `$/lean/plainGoal' RESULT."
+  (let ((goals (plist-get result :goals)))
+    (if goals
+        (if-let* ((goal-list (append goals nil)))
+            (string-join goal-list "\n\n")
+          "No Goal")
+      (or (plist-get result :rendered) "No Goal"))))
+
 (defun lean-info--render (source generation result)
   "Render RESULT for SOURCE when it belongs to GENERATION."
   (when (buffer-live-p source)
@@ -42,7 +51,7 @@
         (with-current-buffer lean-info--buffer
           (let ((inhibit-read-only t))
             (erase-buffer)
-            (insert (or (plist-get result :rendered) "No Goal"))
+            (insert (lean-info--goal-text result))
             (goto-char (point-min))
             (font-lock-flush)))))))
 

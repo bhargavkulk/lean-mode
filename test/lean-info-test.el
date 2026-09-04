@@ -19,9 +19,19 @@
     (with-current-buffer lean-info--buffer
       (lean-info-mode))
     (setq-local lean-info--request-generation 1)
-    (lean-info--render (current-buffer) 1 '(:rendered "⊢ True"))
+    (lean-info--render (current-buffer) 1 '(:rendered "```lean\n⊢ True\n```"
+                                             :goals ["⊢ True"]))
     (with-current-buffer lean-info--buffer
       (should (equal (buffer-string) "⊢ True")))))
+
+(ert-deftest lean-info-renders-no-goal ()
+  (lean-info-test-with-source
+    (with-current-buffer lean-info--buffer
+      (lean-info-mode))
+    (setq-local lean-info--request-generation 1)
+    (lean-info--render (current-buffer) 1 '(:rendered "no goals" :goals []))
+    (with-current-buffer lean-info--buffer
+      (should (equal (buffer-string) "No Goal")))))
 
 (ert-deftest lean-info-ignores-stale-responses ()
   (lean-info-test-with-source
