@@ -16,8 +16,12 @@
 (defvar lean-info--buffer nil
   "The shared Lean Info View buffer.")
 
-(defvar lean-info--request-generation 0
-  "Generation number of the newest Info View request.")
+(defvar lean-info--update-revision 0
+  "Revision of the newest scheduled Info View update.
+
+Each request captures this revision.  Its result is rendered only while it
+still equals this value, so a cursor move or edit invalidates results for the
+previous position before the next debounced request is sent.")
 
 (defvar lean-info--displayed-source nil
   "Source buffer whose goals are currently displayed in the Info View.")
@@ -51,12 +55,12 @@
           "No Goal")
       (or (plist-get result :rendered) "No Goal"))))
 
-(defun lean-info--render (source generation result)
-  "Render RESULT for SOURCE when it belongs to GENERATION."
+(defun lean-info--render (source revision result)
+  "Render RESULT for SOURCE when it belongs to the current REVISION."
   (when (buffer-live-p source)
     (with-current-buffer source
       (when (and lean-info--active
-                 (= generation lean-info--request-generation)
+                 (= revision lean-info--update-revision)
                  (buffer-live-p lean-info--buffer))
         (with-current-buffer lean-info--buffer
           (let ((inhibit-read-only t))
@@ -66,9 +70,9 @@
             (font-lock-flush)))
         (setq lean-info--displayed-source source)))))
 
-(defun lean-info--clear (source generation)
-  "Clear SOURCE's Info View when GENERATION is still current."
-  (lean-info--render source generation nil))
+(defun lean-info--clear (source revision)
+  "Clear SOURCE's Info View when REVISION is still current."
+  (lean-info--render source revision nil))
 
 (defun lean-info--async-request (server method params success-fn error-fn)
   "Request METHOD from SERVER without blocking Emacs.
@@ -84,8 +88,8 @@ JSON-RPC API bundled with older supported Emacs releases."
                            :success-fn success-fn
                            :error-fn error-fn)))
 
-(defun lean-info--request-update (source &optional generation)
-  "Request the goal state at point in SOURCE for GENERATION.
+(defun lean-info--request-update (source &optional revision)
+  "Request the goal state at point in SOURCE for REVISION.
 
 The request is deliberately the plain goal endpoint, which avoids Lean's
 interactive widget protocol."
@@ -94,8 +98,8 @@ interactive widget protocol."
       (when (and lean-info--active
                  eglot--managed-mode
                  (buffer-live-p lean-info--buffer))
-        (let ((generation (or generation
-                              (cl-incf lean-info--request-generation)))
+        (let ((revision (or revision
+                            (cl-incf lean-info--update-revision)))
               (server (eglot-current-server))
               (params (eglot--TextDocumentPositionParams)))
           (when server
@@ -105,9 +109,9 @@ interactive widget protocol."
              '$/lean/plainGoal
              params
              (lambda (result)
-               (lean-info--render source generation result))
+               (lean-info--render source revision result))
              (lambda (&rest _error)
-               (lean-info--clear source generation)))))))))
+               (lean-info--clear source revision)))))))))
 
 (defun lean-info--schedule-update ()
   "Schedule an Info View update for the current Lean buffer."
@@ -115,10 +119,10 @@ interactive widget protocol."
              (buffer-live-p lean-info--buffer))
     (when (timerp lean-info--update-timer)
       (cancel-timer lean-info--update-timer))
-    (let ((generation (cl-incf lean-info--request-generation)))
+    (let ((revision (cl-incf lean-info--update-revision)))
       (setq lean-info--update-timer
             (run-with-idle-timer
-             0.1 nil #'lean-info--request-update (current-buffer) generation)))))
+             0.1 nil #'lean-info--request-update (current-buffer) revision)))))
 
 (defun lean-info--cleanup ()
   "Tear down the Info View session owned by the current source buffer."

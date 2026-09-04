@@ -8,7 +8,7 @@
   "Evaluate BODY in a temporary Lean source buffer."
   (declare (indent 0))
   `(let ((lean-info--buffer (generate-new-buffer " *lean-info-test*"))
-         (lean-info--request-generation 0)
+         (lean-info--update-revision 0)
          (lean-info--displayed-source nil))
      (with-temp-buffer
        (insert "example : True := by\n  trivial\n")
@@ -22,7 +22,7 @@
   (lean-info-test-with-source
     (with-current-buffer lean-info--buffer
       (lean-info-mode))
-    (setq lean-info--request-generation 1)
+    (setq lean-info--update-revision 1)
     (lean-info--render (current-buffer) 1 '(:rendered "```lean\n⊢ True\n```"
                                              :goals ["⊢ True"]))
     (with-current-buffer lean-info--buffer
@@ -32,7 +32,7 @@
   (lean-info-test-with-source
     (with-current-buffer lean-info--buffer
       (lean-info-mode))
-    (setq lean-info--request-generation 1)
+    (setq lean-info--update-revision 1)
     (lean-info--render (current-buffer) 1 '(:rendered "no goals" :goals []))
     (with-current-buffer lean-info--buffer
       (should (equal (buffer-string) "No Goal")))))
@@ -43,7 +43,7 @@
       (let ((inhibit-read-only t))
         (lean-info-mode)
         (insert "current")))
-    (setq lean-info--request-generation 2)
+    (setq lean-info--update-revision 2)
     (lean-info--render (current-buffer) 1 '(:rendered "stale"))
     (with-current-buffer lean-info--buffer
       (should (equal (buffer-string) "current")))))
@@ -54,7 +54,7 @@
       (let ((inhibit-read-only t))
         (lean-info-mode)
         (insert "current")))
-    (setq lean-info--request-generation 1)
+    (setq lean-info--update-revision 1)
     (let (scheduled-function scheduled-arguments)
       (cl-letf (((symbol-function 'run-with-idle-timer)
                  (lambda (_delay _repeat function &rest arguments)
@@ -62,7 +62,7 @@
                          scheduled-arguments arguments)
                    nil)))
         (lean-info--schedule-update))
-      (should (= lean-info--request-generation 2))
+      (should (= lean-info--update-revision 2))
       (should (eq scheduled-function #'lean-info--request-update))
       (should (equal scheduled-arguments (list (current-buffer) 2))))
     (lean-info--render (current-buffer) 1 '(:rendered "stale"))
@@ -73,7 +73,7 @@
   (lean-info-test-with-source
     (with-current-buffer lean-info--buffer
       (lean-info-mode))
-    (setq lean-info--request-generation 1)
+    (setq lean-info--update-revision 1)
     (lean-info--render (current-buffer) 1 '(:goals ["⊢ True"]))
     (setq-local lean-info--update-timer (run-at-time 60 nil #'ignore))
     (add-hook 'post-command-hook #'lean-info--schedule-update nil t)
@@ -103,11 +103,11 @@
           (progn
             (with-current-buffer lean-info--buffer
               (lean-info-mode))
-            (setq lean-info--request-generation 1)
+            (setq lean-info--update-revision 1)
             (lean-info--render first-source 1 '(:goals ["first goal"]))
             (with-current-buffer second-source
               (setq-local lean-info--active t))
-            (setq lean-info--request-generation 2)
+            (setq lean-info--update-revision 2)
             (lean-info--render second-source 2 '(:goals ["second goal"]))
             (with-current-buffer first-source
               (lean-info--cleanup))
