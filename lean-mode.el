@@ -17,6 +17,7 @@
 (require 'flymake)
 (require 'project)
 (require 'lean-syntax)
+(require 'lean-info)
 
 (require 'lean-indent)
 (require 'lean-input)
