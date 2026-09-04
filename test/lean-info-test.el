@@ -2,6 +2,7 @@
 
 (require 'ert)
 (require 'lean-info)
+(require 'lean-mode)
 
 (defmacro lean-info-test-with-source (&rest body)
   "Evaluate BODY in a temporary Lean source buffer."
@@ -74,5 +75,25 @@
             (should-not cursor-type)))
       (when (buffer-live-p lean-info--buffer)
         (kill-buffer lean-info--buffer)))))
+
+(ert-deftest lean-info-auto-opens-when-eglot-starts ()
+  (with-temp-buffer
+    (lean-mode)
+    (let (opened)
+      (cl-letf (((symbol-function 'eglot-managed-p) (lambda () t))
+                ((symbol-function 'lean-info-view)
+                 (lambda () (setq opened t))))
+        (run-hooks 'eglot-managed-mode-hook))
+      (should opened))))
+
+(ert-deftest lean-info-does-not-auto-open-when-eglot-stops ()
+  (with-temp-buffer
+    (lean-mode)
+    (let (opened)
+      (cl-letf (((symbol-function 'eglot-managed-p) (lambda () nil))
+                ((symbol-function 'lean-info-view)
+                 (lambda () (setq opened t))))
+        (run-hooks 'eglot-managed-mode-hook))
+      (should-not opened))))
 
 ;;; lean-info-test.el ends here

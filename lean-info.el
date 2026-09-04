@@ -103,7 +103,8 @@ interactive widget protocol."
 
 (defun lean-info-auto-open ()
   "Open the Info View when Eglot begins managing a Lean buffer."
-  (when (derived-mode-p 'lean-mode)
+  (when (and (derived-mode-p 'lean-mode)
+             (eglot-managed-p))
     (lean-info-view)))
 
 ;;;###autoload
