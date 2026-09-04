@@ -77,6 +77,7 @@ file, recompiling, and reloading all imports."
     (eglot-ensure)))
 
 (add-hook 'lean-mode-hook #'lean-eglot-ensure)
+(add-hook 'eglot-managed-mode-hook #'lean-info-auto-open)
 
 (provide 'lean-mode)
 ;;; lean-mode.el ends here

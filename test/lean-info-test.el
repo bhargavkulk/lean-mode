@@ -6,19 +6,20 @@
 (defmacro lean-info-test-with-source (&rest body)
   "Evaluate BODY in a temporary Lean source buffer."
   (declare (indent 0))
-  `(with-temp-buffer
-     (insert "example : True := by\n  trivial\n")
-     (setq-local lean-info--buffer (generate-new-buffer " *lean-info-test*"))
-     (unwind-protect
-         (progn ,@body)
-       (when (buffer-live-p lean-info--buffer)
-         (kill-buffer lean-info--buffer)))))
+  `(let ((lean-info--buffer (generate-new-buffer " *lean-info-test*"))
+         (lean-info--request-generation 0))
+     (with-temp-buffer
+       (insert "example : True := by\n  trivial\n")
+       (unwind-protect
+           (progn ,@body)
+         (when (buffer-live-p lean-info--buffer)
+           (kill-buffer lean-info--buffer))))))
 
 (ert-deftest lean-info-renders-plain-goal-response ()
   (lean-info-test-with-source
     (with-current-buffer lean-info--buffer
       (lean-info-mode))
-    (setq-local lean-info--request-generation 1)
+    (setq lean-info--request-generation 1)
     (lean-info--render (current-buffer) 1 '(:rendered "```lean\n⊢ True\n```"
                                              :goals ["⊢ True"]))
     (with-current-buffer lean-info--buffer
@@ -28,7 +29,7 @@
   (lean-info-test-with-source
     (with-current-buffer lean-info--buffer
       (lean-info-mode))
-    (setq-local lean-info--request-generation 1)
+    (setq lean-info--request-generation 1)
     (lean-info--render (current-buffer) 1 '(:rendered "no goals" :goals []))
     (with-current-buffer lean-info--buffer
       (should (equal (buffer-string) "No Goal")))))
@@ -39,7 +40,7 @@
       (let ((inhibit-read-only t))
         (lean-info-mode)
         (insert "current")))
-    (setq-local lean-info--request-generation 2)
+    (setq lean-info--request-generation 2)
     (lean-info--render (current-buffer) 1 '(:rendered "stale"))
     (with-current-buffer lean-info--buffer
       (should (equal (buffer-string) "current")))))
@@ -60,5 +61,16 @@
         (lean-info--request-update (current-buffer)))
       (should (eq method '$/lean/plainGoal))
       (should (equal params '(:position (:line 1 :character 2)))))))
+
+(ert-deftest lean-info-reuses-one-buffer ()
+  (let ((lean-info--buffer nil))
+    (unwind-protect
+        (let ((first (lean-info--ensure-buffer))
+              second)
+          (setq second (lean-info--ensure-buffer))
+          (should (eq first second))
+          (should (equal (buffer-name first) "*Lean Info*")))
+      (when (buffer-live-p lean-info--buffer)
+        (kill-buffer lean-info--buffer)))))
 
 ;;; lean-info-test.el ends here

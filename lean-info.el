@@ -12,10 +12,10 @@
 (require 'eglot)
 (require 'lean-syntax)
 
-(defvar-local lean-info--buffer nil
-  "The Info View buffer associated with the current Lean buffer.")
+(defvar lean-info--buffer nil
+  "The shared Lean Info View buffer.")
 
-(defvar-local lean-info--request-generation 0
+(defvar lean-info--request-generation 0
   "Generation number of the newest Info View request.")
 
 (defvar-local lean-info--update-timer nil
@@ -26,9 +26,13 @@
   (setq-local font-lock-defaults lean-info-font-lock-defaults)
   (font-lock-mode 1))
 
-(defun lean-info--buffer-name (source)
-  "Return the Info View buffer name for SOURCE."
-  (format "*Lean Info: %s*" (buffer-name source)))
+(defun lean-info--ensure-buffer ()
+  "Return the shared Info View buffer, creating it when necessary."
+  (unless (buffer-live-p lean-info--buffer)
+    (setq lean-info--buffer (get-buffer-create "*Lean Info*"))
+    (with-current-buffer lean-info--buffer
+      (lean-info-mode)))
+  lean-info--buffer)
 
 (defun lean-info--goal-text (result)
   "Return plain goal text from a `$/lean/plainGoal' RESULT."
@@ -92,11 +96,14 @@ interactive widget protocol."
            0.1 nil #'lean-info--request-update (current-buffer)))))
 
 (defun lean-info--cleanup ()
-  "Stop updating this buffer's Info View."
+  "Stop scheduling Info View updates from the current buffer."
   (when (timerp lean-info--update-timer)
-    (cancel-timer lean-info--update-timer))
-  (when (buffer-live-p lean-info--buffer)
-    (kill-buffer lean-info--buffer)))
+    (cancel-timer lean-info--update-timer)))
+
+(defun lean-info-auto-open ()
+  "Open the Info View when Eglot begins managing a Lean buffer."
+  (when (derived-mode-p 'lean-mode)
+    (lean-info-view)))
 
 ;;;###autoload
 (defun lean-info-view ()
@@ -105,11 +112,7 @@ interactive widget protocol."
   (unless eglot--managed-mode
     (user-error "Lean's LSP server is not connected"))
   (let ((source (current-buffer)))
-    (unless (buffer-live-p lean-info--buffer)
-      (setq lean-info--buffer (get-buffer-create
-                                (lean-info--buffer-name source)))
-      (with-current-buffer lean-info--buffer
-        (lean-info-mode)))
+    (lean-info--ensure-buffer)
     (display-buffer-in-side-window
      lean-info--buffer '((side . right) (window-width . 0.33)))
     (add-hook 'post-command-hook #'lean-info--schedule-update nil t)
