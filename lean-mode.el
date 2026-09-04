@@ -56,6 +56,7 @@ file, recompiling, and reloading all imports."
   (setq-local indent-line-function #'lean-indent-line)
   (setq-local next-error-function #'flymake-goto-next-error)
   (set-input-method "Lean")
+  (lean-input-completion-setup)
   (when (fboundp 'electric-indent-local-mode)
     (electric-indent-local-mode -1)))
 

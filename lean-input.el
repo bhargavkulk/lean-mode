@@ -215,6 +215,67 @@ that contains all translations from QP Except for those corresponding to ASCII."
       (quail-build-decode-map (list (quail-map)) "" decode-map 0)
       (cdr decode-map))))
 
+(defvar lean-input--completion-table-data nil
+  "Cached Lean input completion table.")
+
+(defun lean-input--completion-value (value)
+  "Return the completion replacement string for VALUE.
+Return nil for translations with multiple possible results."
+  (cond
+   ((characterp value) (char-to-string value))
+   ((and (vectorp value)
+         (= (length value) 1)
+         (or (characterp (aref value 0))
+             (stringp (aref value 0))))
+    (let ((value (aref value 0)))
+      (if (characterp value) (char-to-string value) value)))
+   ((stringp value) value)))
+
+(defun lean-input--completion-table ()
+  "Return the cached completion table for the Lean input method."
+  (or lean-input--completion-table-data
+      (setq lean-input--completion-table-data
+            (let ((table (make-hash-table :test #'equal)))
+              (dolist (translation (lean-input-get-translations "Lean") table)
+                (when-let* ((value (lean-input--completion-value
+                                    (cdr translation))))
+                  (puthash (car translation) value table)))))))
+
+(defun lean-input--completion-annotation (candidate)
+  "Return an annotation showing the translation for CANDIDATE."
+  (when-let* ((value (gethash candidate (lean-input--completion-table))))
+    (concat " " value)))
+
+(defun lean-input--completion-exit (candidate status)
+  "Replace completed CANDIDATE with its Lean translation.
+Do not replace an exact completion, since it was not selected from the
+completion UI."
+  (when (and (not (eq status 'exact))
+             (stringp candidate))
+    (when-let* ((value (gethash candidate (lean-input--completion-table))))
+      (delete-region (max (point-min) (- (point) (length candidate))) (point))
+      (insert value))))
+
+(defun lean-input-completion-at-point ()
+  "Complete Lean input abbreviations at point.
+This completion function is active only when the Lean input method is
+active in the current buffer.  Translations with multiple possible
+results are omitted because completion cannot select among them."
+  (when (and (equal current-input-method "Lean")
+             (looking-back "\\\\[^ \t\n]*" (line-beginning-position)))
+    (let ((beg (match-beginning 0))
+          (end (match-end 0)))
+      (list beg end (lean-input--completion-table)
+            :annotation-function #'lean-input--completion-annotation
+            :exit-function #'lean-input--completion-exit
+            :category 'lean-input
+            :exclusive 'no))))
+
+(defun lean-input-completion-setup ()
+  "Enable Lean input completion locally in the current buffer."
+  (add-hook 'completion-at-point-functions
+            #'lean-input-completion-at-point nil t))
+
 (defun lean-input-show-translations (qp)
   "Display all translations used by the Quail package QP (a string).
 \(Except for those corresponding to ASCII)."
@@ -260,6 +321,8 @@ a list of such pairs."
 (defun lean-input-setup ()
   "Set up the Lean input method.
 Use customisable variables and parent input methods to setup Lean input method."
+
+  (setq lean-input--completion-table-data nil)
 
   ;; Create (or reset) the input method.
   (with-temp-buffer
