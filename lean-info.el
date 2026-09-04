@@ -21,9 +21,6 @@
 (defvar-local lean-info--update-timer nil
   "Idle timer used to debounce Info View updates.")
 
-(defvar-local lean-info--source-buffer nil
-  "Lean buffer whose goals are displayed in the current Info View buffer.")
-
 (define-derived-mode lean-info-mode special-mode "Lean Info"
   "Major mode for displaying plain Lean goals."
   (setq-local font-lock-defaults lean-info-font-lock-defaults)
@@ -112,8 +109,7 @@ interactive widget protocol."
       (setq lean-info--buffer (get-buffer-create
                                 (lean-info--buffer-name source)))
       (with-current-buffer lean-info--buffer
-        (lean-info-mode)
-        (setq-local lean-info--source-buffer source)))
+        (lean-info-mode)))
     (display-buffer-in-side-window
      lean-info--buffer '((side . right) (window-width . 0.33)))
     (add-hook 'post-command-hook #'lean-info--schedule-update nil t)
