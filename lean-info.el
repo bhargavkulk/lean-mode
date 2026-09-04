@@ -10,6 +10,7 @@
 
 (require 'cl-lib)
 (require 'eglot)
+(require 'jsonrpc)
 (require 'lean-syntax)
 
 (defvar lean-info--buffer nil
@@ -69,6 +70,20 @@
   "Clear SOURCE's Info View when GENERATION is still current."
   (lean-info--render source generation nil))
 
+(defun lean-info--async-request (server method params success-fn error-fn)
+  "Request METHOD from SERVER without blocking Emacs.
+
+Use Eglot's request helper when available, otherwise use the compatible
+JSON-RPC API bundled with older supported Emacs releases."
+  (if (fboundp 'eglot--async-request)
+      (eglot--async-request server method params
+                            :hint 'lean-info--plain-goal
+                            :success-fn success-fn
+                            :error-fn error-fn)
+    (jsonrpc-async-request server method params
+                           :success-fn success-fn
+                           :error-fn error-fn)))
+
 (defun lean-info--request-update (source &optional generation)
   "Request the goal state at point in SOURCE for GENERATION.
 
@@ -85,15 +100,12 @@ interactive widget protocol."
               (params (eglot--TextDocumentPositionParams)))
           (when server
             (eglot--signal-textDocument/didChange)
-            (eglot--async-request
+            (lean-info--async-request
              server
              '$/lean/plainGoal
              params
-             :hint 'lean-info--plain-goal
-             :success-fn
              (lambda (result)
                (lean-info--render source generation result))
-             :error-fn
              (lambda (&rest _error)
                (lean-info--clear source generation)))))))))
 

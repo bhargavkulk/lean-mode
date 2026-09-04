@@ -134,6 +134,24 @@
       (should (eq method '$/lean/plainGoal))
       (should (equal params '(:position (:line 1 :character 2)))))))
 
+(ert-deftest lean-info-uses-jsonrpc-fallback-without-eglot-async-request ()
+  (let (server method params success-fn error-fn)
+    (cl-letf (((symbol-function 'eglot--async-request) nil)
+              ((symbol-function 'jsonrpc-async-request)
+               (lambda (request-server request-method request-params &rest args)
+                 (setq server request-server
+                       method request-method
+                       params request-params
+                       success-fn (plist-get args :success-fn)
+                       error-fn (plist-get args :error-fn)))))
+      (lean-info--async-request 'server '$/lean/plainGoal '(:position nil)
+                                #'ignore #'ignore))
+    (should (eq server 'server))
+    (should (eq method '$/lean/plainGoal))
+    (should (equal params '(:position nil)))
+    (should (eq success-fn #'ignore))
+    (should (eq error-fn #'ignore))))
+
 (ert-deftest lean-info-reuses-one-buffer ()
   (let ((lean-info--buffer nil))
     (unwind-protect

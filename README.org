@@ -14,7 +14,7 @@ issue in this repo.
 
 * Requirements
 
-- Emacs 31.1 or newer (for Eglot's ~eglot--async-request~); and
+- Emacs 29.1 or newer; and
 - a Lean project using Lake, with ~lake~ available on ~PATH~.
 
 * Installation
