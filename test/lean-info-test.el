@@ -48,6 +48,27 @@
     (with-current-buffer lean-info--buffer
       (should (equal (buffer-string) "current")))))
 
+(ert-deftest lean-info-scheduling-invalidates-an-in-flight-response ()
+  (lean-info-test-with-source
+    (with-current-buffer lean-info--buffer
+      (let ((inhibit-read-only t))
+        (lean-info-mode)
+        (insert "current")))
+    (setq lean-info--request-generation 1)
+    (let (scheduled-function scheduled-arguments)
+      (cl-letf (((symbol-function 'run-with-idle-timer)
+                 (lambda (_delay _repeat function &rest arguments)
+                   (setq scheduled-function function
+                         scheduled-arguments arguments)
+                   nil)))
+        (lean-info--schedule-update))
+      (should (= lean-info--request-generation 2))
+      (should (eq scheduled-function #'lean-info--request-update))
+      (should (equal scheduled-arguments (list (current-buffer) 2))))
+    (lean-info--render (current-buffer) 1 '(:rendered "stale"))
+    (with-current-buffer lean-info--buffer
+      (should (equal (buffer-string) "current")))))
+
 (ert-deftest lean-info-cleanup-clears-owned-view-and-ignores-late-response ()
   (lean-info-test-with-source
     (with-current-buffer lean-info--buffer

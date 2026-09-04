@@ -69,8 +69,8 @@
   "Clear SOURCE's Info View when GENERATION is still current."
   (lean-info--render source generation nil))
 
-(defun lean-info--request-update (source)
-  "Request the goal state at point in SOURCE.
+(defun lean-info--request-update (source &optional generation)
+  "Request the goal state at point in SOURCE for GENERATION.
 
 The request is deliberately the plain goal endpoint, which avoids Lean's
 interactive widget protocol."
@@ -79,7 +79,8 @@ interactive widget protocol."
       (when (and lean-info--active
                  eglot--managed-mode
                  (buffer-live-p lean-info--buffer))
-        (let ((generation (cl-incf lean-info--request-generation))
+        (let ((generation (or generation
+                              (cl-incf lean-info--request-generation)))
               (server (eglot-current-server))
               (params (eglot--TextDocumentPositionParams)))
           (when server
@@ -102,9 +103,10 @@ interactive widget protocol."
              (buffer-live-p lean-info--buffer))
     (when (timerp lean-info--update-timer)
       (cancel-timer lean-info--update-timer))
-    (setq lean-info--update-timer
-          (run-with-idle-timer
-           0.1 nil #'lean-info--request-update (current-buffer)))))
+    (let ((generation (cl-incf lean-info--request-generation)))
+      (setq lean-info--update-timer
+            (run-with-idle-timer
+             0.1 nil #'lean-info--request-update (current-buffer) generation)))))
 
 (defun lean-info--cleanup ()
   "Tear down the Info View session owned by the current source buffer."
