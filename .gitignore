@@ -1,3 +1,4 @@
 *.elc
 /.cache/
 /.dir-locals.el
+/test-project/
