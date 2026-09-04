@@ -8,9 +8,11 @@
   "Evaluate BODY in a temporary Lean source buffer."
   (declare (indent 0))
   `(let ((lean-info--buffer (generate-new-buffer " *lean-info-test*"))
-         (lean-info--request-generation 0))
+         (lean-info--request-generation 0)
+         (lean-info--displayed-source nil))
      (with-temp-buffer
        (insert "example : True := by\n  trivial\n")
+       (setq-local lean-info--active t)
        (unwind-protect
            (progn ,@body)
          (when (buffer-live-p lean-info--buffer)
@@ -45,6 +47,54 @@
     (lean-info--render (current-buffer) 1 '(:rendered "stale"))
     (with-current-buffer lean-info--buffer
       (should (equal (buffer-string) "current")))))
+
+(ert-deftest lean-info-cleanup-clears-owned-view-and-ignores-late-response ()
+  (lean-info-test-with-source
+    (with-current-buffer lean-info--buffer
+      (lean-info-mode))
+    (setq lean-info--request-generation 1)
+    (lean-info--render (current-buffer) 1 '(:goals ["⊢ True"]))
+    (setq-local lean-info--update-timer (run-at-time 60 nil #'ignore))
+    (add-hook 'post-command-hook #'lean-info--schedule-update nil t)
+    (add-hook 'kill-buffer-hook #'lean-info--cleanup nil t)
+    (add-hook 'eglot-managed-mode-hook #'lean-info--eglot-shutdown-cleanup nil t)
+    (let (view-hidden)
+      (cl-letf (((symbol-function 'quit-windows-on)
+                 (lambda (buffer) (setq view-hidden buffer))))
+        (lean-info--cleanup))
+      (should-not lean-info--active)
+      (should-not lean-info--update-timer)
+      (should-not (memq #'lean-info--schedule-update post-command-hook))
+      (should-not (memq #'lean-info--cleanup kill-buffer-hook))
+      (should-not (memq #'lean-info--eglot-shutdown-cleanup
+                        eglot-managed-mode-hook))
+      (should-not lean-info--displayed-source)
+      (should (eq view-hidden lean-info--buffer)))
+    (lean-info--render (current-buffer) 1 '(:goals ["late goal"]))
+    (with-current-buffer lean-info--buffer
+      (should (equal (buffer-string) "")))))
+
+(ert-deftest lean-info-cleanup-preserves-another-source-view ()
+  (lean-info-test-with-source
+    (let ((first-source (current-buffer))
+          (second-source (generate-new-buffer " *lean-info-second-source*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer lean-info--buffer
+              (lean-info-mode))
+            (setq lean-info--request-generation 1)
+            (lean-info--render first-source 1 '(:goals ["first goal"]))
+            (with-current-buffer second-source
+              (setq-local lean-info--active t))
+            (setq lean-info--request-generation 2)
+            (lean-info--render second-source 2 '(:goals ["second goal"]))
+            (with-current-buffer first-source
+              (lean-info--cleanup))
+            (should (eq lean-info--displayed-source second-source))
+            (with-current-buffer lean-info--buffer
+              (should (equal (buffer-string) "second goal"))))
+        (when (buffer-live-p second-source)
+          (kill-buffer second-source))))))
 
 (ert-deftest lean-info-requests-plain-goals-at-point ()
   (lean-info-test-with-source
