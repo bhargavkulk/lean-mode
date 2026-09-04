@@ -117,12 +117,82 @@ ABCDEFGHIJKLMNOPQRSTUVWXYZ\
 
     st))
 
+(defconst lean-font-lock-max-multiline-span 8192
+  "Maximum number of characters scanned for an unfinished multiline form.
+
+Lean attributes and documentation strings may span lines.  Bound their
+font-lock matchers so an unfinished form cannot make normal editing scan the
+rest of a large buffer.")
+
+(defun lean-font-lock--set-match (start end)
+  "Set the current font-lock match to START and END."
+  (set-match-data (list start end)))
+
+(defun lean-font-lock-match-string (limit)
+  "Find the next complete Lean string before LIMIT.
+
+Single-line strings and triple-quoted multiline strings are recognized.  An
+unfinished triple-quoted string is skipped after
+`lean-font-lock-max-multiline-span' characters rather than scanning the whole
+buffer."
+  (catch 'match
+    (while (search-forward "\"" limit t)
+      (let ((start (1- (point))))
+        (if (looking-at "\"\"")
+            (let ((end (min limit
+                            (+ start lean-font-lock-max-multiline-span))))
+              (goto-char (+ start 3))
+              (if (search-forward "\"\"\"" end t)
+                  (progn
+                    (lean-font-lock--set-match start (point))
+                    (throw 'match t))
+                (goto-char end)))
+          (let ((escaped nil)
+                (end (line-end-position))
+                closed)
+            (while (and (< (point) end) (not closed))
+              (let ((character (char-after)))
+                (cond
+                 (escaped (setq escaped nil))
+                 ((eq character ?\\) (setq escaped t))
+                 ((eq character ?\") (setq closed (1+ (point)))))
+                (forward-char 1)))
+            (when closed
+              (lean-font-lock--set-match start closed)
+              (throw 'match t))))))))
+
+(defun lean-font-lock-match-attribute (limit)
+  "Find the next complete Lean attribute before LIMIT.
+
+This recognizes `@[...]' and `attribute [...]'.  Nested brackets are
+accepted.  Incomplete attributes are bounded so that a missing closing bracket
+does not force fontification to inspect a whole buffer."
+  (catch 'match
+    (while (re-search-forward "@\\[\\|\\_<attribute\\_>" limit t)
+      (let* ((start (match-beginning 0))
+             (end (min limit (+ start lean-font-lock-max-multiline-span)))
+             (depth (and (string= (match-string 0) "@[") 1)))
+        (unless depth
+          (skip-chars-forward " \t\n" end)
+          (if (eq (char-after) ?\[)
+              (progn
+                (setq depth 1)
+                (forward-char 1))
+            (goto-char end)))
+        (while (and (> depth 0) (< (point) end))
+          (pcase (char-after)
+            (?\[ (setq depth (1+ depth)))
+            (?\] (setq depth (1- depth))))
+          (forward-char 1))
+        (if (and depth (zerop depth))
+            (progn
+              (lean-font-lock--set-match start (point))
+              (throw 'match t))
+          (goto-char end))))))
+
 (defconst lean-font-lock-defaults
   `((;; attributes
-     (,(rx word-start "attribute" word-end (zero-or-more whitespace) (group (one-or-more "[" (zero-or-more (not (any "]"))) "]" (zero-or-more whitespace))))
-      (1 'font-lock-preprocessor-face))
-     (,(rx (group "@[" (zero-or-more (not (any "]"))) "]"))
-      (1 'font-lock-preprocessor-face))
+     (lean-font-lock-match-attribute (0 'font-lock-preprocessor-face))
      (,(rx (group "#" (or "eval" "print" "reduce" "help" "check" "lang" "check_failure" "synth")))
       (1 'font-lock-keyword-face))
      ;; mutual definitions "names"
@@ -135,14 +205,13 @@ ABCDEFGHIJKLMNOPQRSTUVWXYZ\
            word-end
            (group (zero-or-more (not (any " \t\n\r{([,"))) (zero-or-more (zero-or-more whitespace) "," (zero-or-more whitespace) (not (any " \t\n\r{([,")))))
       (1 'font-lock-function-name-face))
-     ;; declarations
+     ;; Declarations.  Do not consume binder blocks here: an unfinished `{`
+     ;; could otherwise make this pattern scan the rest of the buffer.
      (,(rx word-start
            (group (or "inductive" (group "class" (zero-or-more whitespace) "inductive") "instance" "structure" "class" "theorem" "axiom" "lemma" "definition" "def" "constant"))
            word-end (zero-or-more whitespace)
-           (group (zero-or-more "{" (zero-or-more (not (any "}"))) "}" (zero-or-more whitespace)))
-           (zero-or-more whitespace)
            (group (zero-or-more (not (any " \t\n\r{([")))))
-      (4 'font-lock-function-name-face))
+      (3 'font-lock-function-name-face))
      ;; Constants which have a keyword as subterm
      (,(rx (or "∘if")) . 'font-lock-constant-face)
      ;; Keywords
@@ -153,8 +222,8 @@ ABCDEFGHIJKLMNOPQRSTUVWXYZ\
      ;; Types
      (,(rx word-start (or "Prop" "Type" "Type*" "Sort" "Sort*") symbol-end) . 'font-lock-type-face)
      (,(rx word-start (group (or "Prop" "Type" "Sort")) ".") (1 'font-lock-type-face))
-     ;; String
-     ("\"[^\"]*\"" . 'font-lock-string-face)
+     ;; Strings
+     (lean-font-lock-match-string (0 'font-lock-string-face))
      ;; ;; Constants
      (,lean-constants-regexp . 'font-lock-constant-face)
      (,lean-numerals-regexp . 'font-lock-constant-face)
