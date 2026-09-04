@@ -3,7 +3,7 @@
 ;; Version: 0.1.0
 ;; Author: Bhargav Kulkarni
 ;; URL: https://github.com/bhargavkulk/lean-mode
-;; Package-Requires: ((emacs "29.1"))
+;; Package-Requires: ((emacs "31.1"))
 ;; Keywords: languages, tools, lean
 
 ;;; Commentary:
