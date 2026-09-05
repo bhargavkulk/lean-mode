@@ -113,6 +113,7 @@
   (lean-info-test-with-source
     (setq-local lean-info--last-position (point))
     (setq-local lean-info--last-modified-tick (buffer-chars-modified-tick))
+    (setq lean-info--displayed-source (current-buffer))
     (let (scheduled)
       (cl-letf (((symbol-function 'lean-info--schedule-update)
                  (lambda () (setq scheduled (1+ (or scheduled 0))))))
@@ -123,6 +124,24 @@
         (insert " ")
         (lean-info--update-if-needed))
       (should (= scheduled 2)))))
+
+(ert-deftest lean-info-refreshes-when-returning-to-a-source-buffer ()
+  (lean-info-test-with-source
+    (let ((first-source (current-buffer))
+          (second-source (generate-new-buffer " *lean-info-second-source*")))
+      (unwind-protect
+          (progn
+            (setq-local lean-info--last-position (point))
+            (setq-local lean-info--last-modified-tick (buffer-chars-modified-tick))
+            (setq lean-info--displayed-source second-source)
+            (let (scheduled)
+              (cl-letf (((symbol-function 'lean-info--schedule-update)
+                         (lambda () (setq scheduled t))))
+                (lean-info--update-if-needed))
+              (should scheduled)
+              (should (eq lean-info--displayed-source first-source))))
+        (when (buffer-live-p second-source)
+          (kill-buffer second-source))))))
 
 (ert-deftest lean-info-throttles-updates-with-a-trailing-request ()
   (lean-info-test-with-source

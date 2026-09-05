@@ -318,13 +318,16 @@ interactive widget protocol."
                            (current-buffer) revision))))))
 
 (defun lean-info--update-if-needed ()
-  "Schedule an update only after the point or source text has changed."
+  "Schedule an update after the point, source text, or displayed source changes."
   (let ((position (point))
-        (modified-tick (buffer-chars-modified-tick)))
-    (unless (and (equal position lean-info--last-position)
+        (modified-tick (buffer-chars-modified-tick))
+        (source-changed (not (eq (current-buffer) lean-info--displayed-source))))
+    (unless (and (not source-changed)
+                 (equal position lean-info--last-position)
                  (= modified-tick lean-info--last-modified-tick))
       (setq lean-info--last-position position
-            lean-info--last-modified-tick modified-tick)
+            lean-info--last-modified-tick modified-tick
+            lean-info--displayed-source (current-buffer))
       (if (lean-info--processing-at-point-p)
           (lean-info--show-processing)
         (lean-info--schedule-update)))))
