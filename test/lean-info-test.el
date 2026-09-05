@@ -37,6 +37,31 @@
     (with-current-buffer lean-info--buffer
       (should (equal (buffer-string) "No Goal")))))
 
+(ert-deftest lean-info-render-preserves-info-view-scroll-position ()
+  (lean-info-test-with-source
+    (let* ((window (selected-window))
+           (original-buffer (window-buffer window))
+           (goals (mapconcat (lambda (number) (format "goal %d" number))
+                             (number-sequence 1 100) "\n")))
+      (unwind-protect
+          (progn
+            (set-window-buffer window lean-info--buffer)
+            (with-current-buffer lean-info--buffer
+              (lean-info-mode)
+              (let ((inhibit-read-only t))
+                (insert goals)
+                (goto-char (point-min))
+                (forward-line 50)
+                (set-window-start window (point) t)))
+            (let ((point (with-current-buffer lean-info--buffer (point)))
+                  (window-start (window-start window)))
+              (setq lean-info--update-revision 1)
+              (lean-info--render (current-buffer) 1 `(:goals [,goals]))
+              (with-current-buffer lean-info--buffer
+                (should (= (point) point)))
+              (should (= (window-start window) window-start))))
+        (set-window-buffer window original-buffer)))))
+
 (ert-deftest lean-info-ignores-stale-responses ()
   (lean-info-test-with-source
     (with-current-buffer lean-info--buffer
