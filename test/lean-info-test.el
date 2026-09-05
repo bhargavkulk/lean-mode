@@ -9,14 +9,18 @@
   (declare (indent 0))
   `(let ((lean-info--buffer (generate-new-buffer " *lean-info-test*"))
          (lean-info--update-revision 0)
-         (lean-info--displayed-source nil))
+         (lean-info--displayed-source nil)
+         (file (make-temp-file "lean-info-test-" nil ".lean")))
      (with-temp-buffer
        (insert "example : True := by\n  trivial\n")
+       (set-visited-file-name file t)
        (setq-local lean-info--active t)
+       (setq-local lean-info--processing-ranges [])
        (unwind-protect
            (progn ,@body)
          (when (buffer-live-p lean-info--buffer)
-           (kill-buffer lean-info--buffer))))))
+           (kill-buffer lean-info--buffer))
+         (delete-file file)))))
 
 (ert-deftest lean-info-renders-plain-goal-response ()
   (lean-info-test-with-source
@@ -139,6 +143,37 @@
       (should (equal (nreverse requests) (list (list (current-buffer) 1))))
       (should (eq scheduled-function #'lean-info--run-scheduled-update))
       (should (equal scheduled-arguments (list (current-buffer) 2))))))
+
+(ert-deftest lean-info-shows-processing-until-its-point-is-ready ()
+  (lean-info-test-with-source
+    (setq-local lean-info--processing-ranges :unknown)
+    (with-current-buffer lean-info--buffer
+      (lean-info-mode))
+    (lean-info--show-processing)
+    (with-current-buffer lean-info--buffer
+      (should (equal (buffer-string) "Processing file...")))
+    (let (scheduled)
+      (cl-letf (((symbol-function 'lean-info--schedule-update)
+                 (lambda () (setq scheduled t))))
+        (lean-info-handle-file-progress
+         (eglot-path-to-uri buffer-file-name)
+         []))
+      (should scheduled))))
+
+(ert-deftest lean-info-keeps-processing-for-a-reported-range ()
+  (lean-info-test-with-source
+    (setq-local lean-info--processing-ranges [])
+    (with-current-buffer lean-info--buffer
+      (lean-info-mode))
+    (let (requested)
+      (cl-letf (((symbol-function 'lean-info--request-update)
+                 (lambda (&rest _) (setq requested t))))
+        (lean-info-handle-file-progress
+         (eglot-path-to-uri buffer-file-name)
+         [(:range (:start (:line 0) :end (:line 10)))]))
+      (should-not requested))
+    (with-current-buffer lean-info--buffer
+      (should (equal (buffer-string) "Processing file...")))))
 
 (ert-deftest lean-info-cleanup-clears-owned-view-and-ignores-late-response ()
   (lean-info-test-with-source

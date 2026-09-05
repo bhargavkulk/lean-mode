@@ -11,6 +11,7 @@
 (require 'cl-lib)
 (require 'eglot)
 (require 'jsonrpc)
+(require 'seq)
 (require 'lean-syntax)
 
 (defvar lean-info--buffer nil
@@ -40,6 +41,12 @@ previous position before the next throttled request is sent.")
 
 (defvar-local lean-info--last-modified-tick nil
   "Modification tick used by the most recently observed Info View update.")
+
+(defvar-local lean-info--processing-ranges :unknown
+  "Ranges currently being elaborated by Lean in this source buffer.
+
+The value is `:unknown' until Lean sends its first `$/lean/fileProgress'
+notification.  An empty vector means the whole file is ready.")
 
 (defvar-local lean-info--active nil
   "Non-nil while this source buffer owns an active Info View session.")
@@ -96,6 +103,39 @@ previous position before the next throttled request is sent.")
 (defun lean-info--clear (source revision)
   "Clear SOURCE's Info View when REVISION is still current."
   (lean-info--render source revision nil))
+
+(defun lean-info--processing-at-point-p ()
+  "Return non-nil when Lean is still elaborating point in this buffer."
+  (or (eq lean-info--processing-ranges :unknown)
+      (let ((line (1- (line-number-at-pos))))
+        (seq-some
+         (lambda (processing)
+           (let* ((range (plist-get processing :range))
+                  (start (plist-get (plist-get range :start) :line))
+                  (end (plist-get (plist-get range :end) :line)))
+             (and start end (<= start line end))))
+         (append lean-info--processing-ranges nil)))))
+
+(defun lean-info--show-processing ()
+  "Render a processing indicator and invalidate any pending goal request."
+  (let ((revision (cl-incf lean-info--update-revision)))
+    (lean-info--render (current-buffer) revision '(:goals ["Processing file..."]))))
+
+(defun lean-info-handle-file-progress (uri processing)
+  "Update the Info View for URI after Lean reports PROCESSING ranges.
+
+PROCESSING is the range list from Lean's `$/lean/fileProgress' notification.
+While point is within a reported range, show a processing indicator instead of
+asking Lean for a goal that is not ready yet."
+  (when-let* ((source (find-buffer-visiting (eglot-uri-to-path uri))))
+    (with-current-buffer source
+      (let ((was-processing (lean-info--processing-at-point-p)))
+        (setq lean-info--processing-ranges processing)
+        (when lean-info--active
+          (if (lean-info--processing-at-point-p)
+              (lean-info--show-processing)
+            (when was-processing
+              (lean-info--schedule-update))))))))
 
 (defun lean-info--async-request (server method params success-fn error-fn)
   "Request METHOD from SERVER without blocking Emacs.
@@ -176,7 +216,9 @@ interactive widget protocol."
                  (= modified-tick lean-info--last-modified-tick))
       (setq lean-info--last-position position
             lean-info--last-modified-tick modified-tick)
-      (lean-info--schedule-update))))
+      (if (lean-info--processing-at-point-p)
+          (lean-info--show-processing)
+        (lean-info--schedule-update)))))
 
 (defun lean-info--cleanup ()
   "Tear down the Info View session owned by the current source buffer."
@@ -185,7 +227,8 @@ interactive widget protocol."
   (setq lean-info--update-timer nil
         lean-info--last-request-time nil
         lean-info--last-position nil
-        lean-info--last-modified-tick nil)
+        lean-info--last-modified-tick nil
+        lean-info--processing-ranges :unknown)
   (remove-hook 'post-command-hook #'lean-info--update-if-needed t)
   (remove-hook 'kill-buffer-hook #'lean-info--cleanup t)
   (remove-hook 'eglot-managed-mode-hook #'lean-info--eglot-shutdown-cleanup t)
@@ -226,7 +269,9 @@ interactive widget protocol."
     (add-hook 'post-command-hook #'lean-info--update-if-needed nil t)
     (add-hook 'kill-buffer-hook #'lean-info--cleanup nil t)
     (add-hook 'eglot-managed-mode-hook #'lean-info--eglot-shutdown-cleanup nil t)
-    (lean-info--request-update source)))
+    (if (lean-info--processing-at-point-p)
+        (lean-info--show-processing)
+      (lean-info--request-update source))))
 
 (provide 'lean-info)
 ;;; lean-info.el ends here

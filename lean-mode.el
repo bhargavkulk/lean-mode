@@ -28,6 +28,12 @@
 (defclass lean-eglot-lsp-server (eglot-lsp-server) nil
   :documentation "Eglot server class for Lean.")
 
+(cl-defmethod eglot-handle-notification
+  ((_server lean-eglot-lsp-server) (_method (eql $/lean/fileProgress))
+   &key textDocument processing &allow-other-keys)
+  "Update the Info View with Lean's file elaboration progress."
+  (lean-info-handle-file-progress (plist-get textDocument :uri) processing))
+
 (defun lean-eglot-server-class-init (&optional _interactive)
   "Return the Lean Eglot server class and command."
   (list 'lean-eglot-lsp-server "lake" "serve"))
