@@ -164,7 +164,8 @@ asking Lean for a goal that is not ready yet."
     (with-current-buffer source
       (let ((was-processing (lean-info--processing-at-point-p)))
         (setq lean-info--processing-ranges processing)
-        (when lean-info--active
+        (when (and lean-info--active
+                   (eq source lean-info--displayed-source))
           (if (lean-info--processing-at-point-p)
               (lean-info--show-processing)
             (when was-processing

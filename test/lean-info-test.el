@@ -165,6 +165,7 @@
     (setq-local lean-info--processing-ranges [])
     (with-current-buffer lean-info--buffer
       (lean-info-mode))
+    (setq lean-info--displayed-source (current-buffer))
     (let (requested)
       (cl-letf (((symbol-function 'lean-info--request-update)
                  (lambda (&rest _) (setq requested t))))
@@ -174,6 +175,34 @@
       (should-not requested))
     (with-current-buffer lean-info--buffer
       (should (equal (buffer-string) "Processing file...")))))
+
+(ert-deftest lean-info-file-progress-does-not-replace-another-source-view ()
+  (lean-info-test-with-source
+    (let ((first-source (current-buffer))
+          (second-source (generate-new-buffer " *lean-info-second-source*"))
+          (second-file (make-temp-file "lean-info-second-" nil ".lean")))
+      (unwind-protect
+          (progn
+            (with-current-buffer lean-info--buffer
+              (lean-info-mode))
+            (setq lean-info--update-revision 1)
+            (lean-info--render first-source 1 '(:goals ["first goal"]))
+            (with-current-buffer second-source
+              (insert "example : True := by\n  trivial\n")
+              (set-visited-file-name second-file t)
+              (goto-char (point-min))
+              (setq-local lean-info--active t)
+              (setq-local lean-info--processing-ranges []))
+            (lean-info-handle-file-progress
+             (eglot-path-to-uri second-file)
+             [(:range (:start (:line 0) :end (:line 1)))])
+            (should (eq lean-info--displayed-source first-source))
+            (should (= lean-info--update-revision 1))
+            (with-current-buffer lean-info--buffer
+              (should (equal (buffer-string) "first goal"))))
+        (when (buffer-live-p second-source)
+          (kill-buffer second-source))
+        (delete-file second-file)))))
 
 (ert-deftest lean-info-renders-current-line-lean-diagnostics ()
   (lean-info-test-with-source
