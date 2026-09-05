@@ -184,16 +184,13 @@
     (lean-info--render
      (current-buffer) 1
      '(:goals ["⊢ True"]))
-    (let (requested)
-      (cl-letf (((symbol-function 'lean-info--request-update)
-                 (lambda (source) (setq requested source))))
-        (lean-info-handle-diagnostics
-         (eglot-path-to-uri buffer-file-name)
-         [(:severity 1 :message "tactic 'exact' failed\n"
-           :range (:start (:line 0) :end (:line 0)))
-          (:severity 2 :message "other line"
-           :range (:start (:line 1) :end (:line 1)))]))
-      (should (eq requested (current-buffer))))
+    (lean-info-handle-diagnostics
+     (eglot-path-to-uri buffer-file-name)
+     [(:severity 1 :message "tactic 'exact' failed\n"
+       :range (:start (:line 0) :end (:line 0)))
+      (:severity 2 :message "other line"
+       :range (:start (:line 1) :end (:line 1)))])
+    (should (= lean-info--update-revision 1))
     (with-current-buffer lean-info--buffer
       (should (equal (buffer-string)
                      "⊢ True\n\nerror:\ntactic 'exact' failed")))))
