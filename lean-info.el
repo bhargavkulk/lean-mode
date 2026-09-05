@@ -171,7 +171,11 @@ asking Lean for a goal that is not ready yet."
               (lean-info--schedule-update))))))))
 
 (defun lean-info-handle-diagnostics (uri diagnostics)
-  "Refresh URI's Info View with Lean DIAGNOSTICS for the current line."
+  "Refresh URI's Info View with Lean DIAGNOSTICS for the current line.
+
+When Lean has produced a diagnostic at point, request its goal immediately:
+the diagnostic proves that point has progressed beyond the initial processing
+state, even if a delayed file-progress notification still says otherwise."
   (when-let* ((source (find-buffer-visiting (eglot-uri-to-path uri))))
     (with-current-buffer source
       (setq lean-info--diagnostics diagnostics)
@@ -179,7 +183,9 @@ asking Lean for a goal that is not ready yet."
                  (eq source lean-info--displayed-source)
                  lean-info--last-goal-text)
         (lean-info--render source (cl-incf lean-info--update-revision)
-                           `(:rendered ,lean-info--last-goal-text))))))
+                           `(:rendered ,lean-info--last-goal-text))
+        (unless (string-empty-p (lean-info--diagnostic-text))
+          (lean-info--request-update source))))))
 
 (defun lean-info--async-request (server method params success-fn error-fn)
   "Request METHOD from SERVER without blocking Emacs.
