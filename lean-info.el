@@ -21,13 +21,25 @@
 
 Each request captures this revision.  Its result is rendered only while it
 still equals this value, so a cursor move or edit invalidates results for the
-previous position before the next debounced request is sent.")
+previous position before the next throttled request is sent.")
 
 (defvar lean-info--displayed-source nil
   "Source buffer whose goals are currently displayed in the Info View.")
 
+(defconst lean-info-update-cooldown 0.05
+  "Seconds between Info View goal requests during continuous activity.")
+
 (defvar-local lean-info--update-timer nil
-  "Idle timer used to debounce Info View updates.")
+  "Timer for the trailing Info View update in the current cooldown period.")
+
+(defvar-local lean-info--last-request-time nil
+  "Time at which the current source last requested Info View goals.")
+
+(defvar-local lean-info--last-position nil
+  "Position used by the most recently observed Info View update.")
+
+(defvar-local lean-info--last-modified-tick nil
+  "Modification tick used by the most recently observed Info View update.")
 
 (defvar-local lean-info--active nil
   "Non-nil while this source buffer owns an active Info View session.")
@@ -63,21 +75,23 @@ previous position before the next debounced request is sent.")
                  (= revision lean-info--update-revision)
                  (buffer-live-p lean-info--buffer))
         (with-current-buffer lean-info--buffer
-          (let ((inhibit-read-only t)
-                (point (point))
-                (window-starts
-                 (mapcar (lambda (window)
-                           (cons window (window-start window)))
-                         (get-buffer-window-list lean-info--buffer nil t))))
-            (erase-buffer)
-            (insert (lean-info--goal-text result))
-            (goto-char (min point (point-max)))
-            (dolist (window-start window-starts)
-              (when (window-live-p (car window-start))
-                (set-window-start (car window-start)
-                                  (min (cdr window-start) (point-max)) t)))
-            (font-lock-flush)))
-        (setq lean-info--displayed-source source)))))
+          (let ((goal-text (lean-info--goal-text result)))
+            (unless (equal (buffer-string) goal-text)
+              (let ((inhibit-read-only t)
+                    (point (point))
+                    (window-starts
+                     (mapcar (lambda (window)
+                               (cons window (window-start window)))
+                             (get-buffer-window-list lean-info--buffer nil t))))
+                (erase-buffer)
+                (insert goal-text)
+                (goto-char (min point (point-max)))
+                (dolist (window-start window-starts)
+                  (when (window-live-p (car window-start))
+                    (set-window-start (car window-start)
+                                      (min (cdr window-start) (point-max)) t)))
+                (font-lock-flush))))
+        (setq lean-info--displayed-source source))))))
 
 (defun lean-info--clear (source revision)
   "Clear SOURCE's Info View when REVISION is still current."
@@ -122,23 +136,57 @@ interactive widget protocol."
              (lambda (&rest _error)
                (lean-info--clear source revision)))))))))
 
+(defun lean-info--run-scheduled-update (source revision)
+  "Request SOURCE's goals for REVISION after a cooldown period."
+  (when (buffer-live-p source)
+    (with-current-buffer source
+      (setq lean-info--update-timer nil)
+      (when (and lean-info--active
+                 (= revision lean-info--update-revision))
+        (setq lean-info--last-request-time (float-time))
+        (lean-info--request-update source revision)))))
+
 (defun lean-info--schedule-update ()
-  "Schedule an Info View update for the current Lean buffer."
+  "Request current goals now, or once at the end of the cooldown period."
   (when (and lean-info--active
              (buffer-live-p lean-info--buffer))
-    (when (timerp lean-info--update-timer)
-      (cancel-timer lean-info--update-timer))
-    (let ((revision (cl-incf lean-info--update-revision)))
-      (setq lean-info--update-timer
-            (run-with-idle-timer
-             0.1 nil #'lean-info--request-update (current-buffer) revision)))))
+    (let* ((now (float-time))
+           (revision (cl-incf lean-info--update-revision))
+           (elapsed (and lean-info--last-request-time
+                         (- now lean-info--last-request-time))))
+      (if (or (null elapsed) (>= elapsed lean-info-update-cooldown))
+          (progn
+            (when (timerp lean-info--update-timer)
+              (cancel-timer lean-info--update-timer))
+            (setq lean-info--update-timer nil
+                  lean-info--last-request-time now)
+            (lean-info--request-update (current-buffer) revision))
+        (when (timerp lean-info--update-timer)
+          (cancel-timer lean-info--update-timer))
+        (setq lean-info--update-timer
+              (run-at-time (- lean-info-update-cooldown elapsed) nil
+                           #'lean-info--run-scheduled-update
+                           (current-buffer) revision))))))
+
+(defun lean-info--update-if-needed ()
+  "Schedule an update only after the point or source text has changed."
+  (let ((position (point))
+        (modified-tick (buffer-chars-modified-tick)))
+    (unless (and (equal position lean-info--last-position)
+                 (= modified-tick lean-info--last-modified-tick))
+      (setq lean-info--last-position position
+            lean-info--last-modified-tick modified-tick)
+      (lean-info--schedule-update))))
 
 (defun lean-info--cleanup ()
   "Tear down the Info View session owned by the current source buffer."
   (when (timerp lean-info--update-timer)
     (cancel-timer lean-info--update-timer))
-  (setq lean-info--update-timer nil)
-  (remove-hook 'post-command-hook #'lean-info--schedule-update t)
+  (setq lean-info--update-timer nil
+        lean-info--last-request-time nil
+        lean-info--last-position nil
+        lean-info--last-modified-tick nil)
+  (remove-hook 'post-command-hook #'lean-info--update-if-needed t)
   (remove-hook 'kill-buffer-hook #'lean-info--cleanup t)
   (remove-hook 'eglot-managed-mode-hook #'lean-info--eglot-shutdown-cleanup t)
   (setq lean-info--active nil)
@@ -172,7 +220,10 @@ interactive widget protocol."
     (display-buffer-in-side-window
      lean-info--buffer '((side . right) (window-width . 0.33)))
     (setq-local lean-info--active t)
-    (add-hook 'post-command-hook #'lean-info--schedule-update nil t)
+    (setq-local lean-info--last-position (point))
+    (setq-local lean-info--last-modified-tick (buffer-chars-modified-tick))
+    (setq-local lean-info--last-request-time (float-time))
+    (add-hook 'post-command-hook #'lean-info--update-if-needed nil t)
     (add-hook 'kill-buffer-hook #'lean-info--cleanup nil t)
     (add-hook 'eglot-managed-mode-hook #'lean-info--eglot-shutdown-cleanup nil t)
     (lean-info--request-update source)))

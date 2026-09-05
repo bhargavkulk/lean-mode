@@ -37,6 +37,19 @@
     (with-current-buffer lean-info--buffer
       (should (equal (buffer-string) "No Goal")))))
 
+(ert-deftest lean-info-does-not-redraw-unchanged-goals ()
+  (lean-info-test-with-source
+    (with-current-buffer lean-info--buffer
+      (lean-info-mode)
+      (let ((inhibit-read-only t))
+        (insert "⊢ True")))
+    (setq lean-info--update-revision 1)
+    (let (erased)
+      (cl-letf (((symbol-function 'erase-buffer)
+                 (lambda () (setq erased t))))
+        (lean-info--render (current-buffer) 1 '(:goals ["⊢ True"])))
+      (should-not erased))))
+
 (ert-deftest lean-info-render-preserves-info-view-scroll-position ()
   (lean-info-test-with-source
     (let* ((window (selected-window))
@@ -80,19 +93,52 @@
         (lean-info-mode)
         (insert "current")))
     (setq lean-info--update-revision 1)
-    (let (scheduled-function scheduled-arguments)
-      (cl-letf (((symbol-function 'run-with-idle-timer)
-                 (lambda (_delay _repeat function &rest arguments)
-                   (setq scheduled-function function
-                         scheduled-arguments arguments)
-                   nil)))
+    (let (requested)
+      (cl-letf (((symbol-function 'float-time) (lambda (&optional _value) 10.0))
+                ((symbol-function 'lean-info--request-update)
+                 (lambda (source revision)
+                   (setq requested (list source revision)))))
         (lean-info--schedule-update))
       (should (= lean-info--update-revision 2))
-      (should (eq scheduled-function #'lean-info--request-update))
-      (should (equal scheduled-arguments (list (current-buffer) 2))))
+      (should (equal requested (list (current-buffer) 2))))
     (lean-info--render (current-buffer) 1 '(:rendered "stale"))
     (with-current-buffer lean-info--buffer
       (should (equal (buffer-string) "current")))))
+
+(ert-deftest lean-info-schedules-only-after-a-point-or-text-change ()
+  (lean-info-test-with-source
+    (setq-local lean-info--last-position (point))
+    (setq-local lean-info--last-modified-tick (buffer-chars-modified-tick))
+    (let (scheduled)
+      (cl-letf (((symbol-function 'lean-info--schedule-update)
+                 (lambda () (setq scheduled (1+ (or scheduled 0))))))
+        (lean-info--update-if-needed)
+        (goto-char (point-min))
+        (forward-char 1)
+        (lean-info--update-if-needed)
+        (insert " ")
+        (lean-info--update-if-needed))
+      (should (= scheduled 2)))))
+
+(ert-deftest lean-info-throttles-updates-with-a-trailing-request ()
+  (lean-info-test-with-source
+    (let (requests scheduled-function scheduled-arguments)
+      (cl-letf (((symbol-function 'float-time)
+                 (let ((time 10.0))
+                   (lambda (&optional _value) time)))
+                ((symbol-function 'lean-info--request-update)
+                 (lambda (source revision)
+                   (push (list source revision) requests)))
+                ((symbol-function 'run-at-time)
+                 (lambda (_delay _repeat function &rest arguments)
+                   (setq scheduled-function function
+                         scheduled-arguments arguments)
+                   'timer)))
+        (lean-info--schedule-update)
+        (lean-info--schedule-update))
+      (should (equal (nreverse requests) (list (list (current-buffer) 1))))
+      (should (eq scheduled-function #'lean-info--run-scheduled-update))
+      (should (equal scheduled-arguments (list (current-buffer) 2))))))
 
 (ert-deftest lean-info-cleanup-clears-owned-view-and-ignores-late-response ()
   (lean-info-test-with-source
@@ -101,7 +147,7 @@
     (setq lean-info--update-revision 1)
     (lean-info--render (current-buffer) 1 '(:goals ["⊢ True"]))
     (setq-local lean-info--update-timer (run-at-time 60 nil #'ignore))
-    (add-hook 'post-command-hook #'lean-info--schedule-update nil t)
+    (add-hook 'post-command-hook #'lean-info--update-if-needed nil t)
     (add-hook 'kill-buffer-hook #'lean-info--cleanup nil t)
     (add-hook 'eglot-managed-mode-hook #'lean-info--eglot-shutdown-cleanup nil t)
     (let (view-hidden)
@@ -110,7 +156,7 @@
         (lean-info--cleanup))
       (should-not lean-info--active)
       (should-not lean-info--update-timer)
-      (should-not (memq #'lean-info--schedule-update post-command-hook))
+      (should-not (memq #'lean-info--update-if-needed post-command-hook))
       (should-not (memq #'lean-info--cleanup kill-buffer-hook))
       (should-not (memq #'lean-info--eglot-shutdown-cleanup
                         eglot-managed-mode-hook))
