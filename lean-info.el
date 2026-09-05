@@ -10,6 +10,7 @@
 
 (require 'cl-lib)
 (require 'eglot)
+(require 'fringe)
 (require 'jsonrpc)
 (require 'seq)
 (require 'lean-syntax)
@@ -47,6 +48,21 @@ previous position before the next throttled request is sent.")
 
 The value is `:unknown' until Lean sends its first `$/lean/fileProgress'
 notification.  An empty vector means the whole file is ready.")
+
+(defface lean-info-processing-fringe
+  '((t :foreground "orange"))
+  "Face for Lean file-processing markers in the fringe."
+  :group 'faces)
+
+(define-fringe-bitmap 'lean-info-processing-bar
+  [24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24]
+  nil nil 'center)
+
+(defvar-local lean-info--processing-marker-timer nil
+  "Timer that coalesces fringe updates for the current source buffer.")
+
+(defvar-local lean-info--processing-overlays nil
+  "Fringe overlays marking lines currently processed by Lean.")
 
 (defvar-local lean-info--diagnostics []
   "Latest diagnostics published by Lean for this source buffer.")
@@ -154,6 +170,49 @@ notification.  An empty vector means the whole file is ready.")
   (let ((revision (cl-incf lean-info--update-revision)))
     (lean-info--render (current-buffer) revision '(:goals ["Processing file..."]))))
 
+(defun lean-info--clear-processing-markers ()
+  "Remove all Lean processing markers from the current source buffer."
+  (mapc #'delete-overlay lean-info--processing-overlays)
+  (setq lean-info--processing-overlays nil))
+
+(defun lean-info--refresh-processing-markers (source)
+  "Render SOURCE's current Lean processing ranges in its left fringe."
+  (when (buffer-live-p source)
+    (with-current-buffer source
+      (setq lean-info--processing-marker-timer nil)
+      (lean-info--clear-processing-markers)
+      (unless (eq lean-info--processing-ranges :unknown)
+        (save-excursion
+          (save-restriction
+            (widen)
+            (let ((last-line (1- (line-number-at-pos (point-max)))))
+              (dolist (processing (append lean-info--processing-ranges nil))
+                (let* ((range (plist-get processing :range))
+                       (start (plist-get (plist-get range :start) :line))
+                       (end (plist-get (plist-get range :end) :line)))
+                  (when (and (integerp start) (integerp end))
+                    (let ((first-line (max 0 start))
+                          (final-line (min end last-line)))
+                      (when (<= first-line final-line)
+                        (cl-loop for line from first-line to final-line
+                                 do (goto-char (point-min))
+                                 do (forward-line line)
+                                 do (let ((overlay (make-overlay (point) (point))))
+                                      (overlay-put overlay 'before-string
+                                                   (propertize "!"
+                                                               'display
+                                                               '(left-fringe
+                                                                 lean-info-processing-bar
+                                                                 lean-info-processing-fringe)))
+                                      (push overlay lean-info--processing-overlays)))))))))))))))
+
+(defun lean-info--schedule-processing-marker-refresh ()
+  "Coalesce a fringe refresh for the current source's processing ranges."
+  (unless (timerp lean-info--processing-marker-timer)
+    (setq lean-info--processing-marker-timer
+          (run-at-time 0.1 nil #'lean-info--refresh-processing-markers
+                       (current-buffer)))))
+
 (defun lean-info-handle-file-progress (uri processing)
   "Update the Info View for URI after Lean reports PROCESSING ranges.
 
@@ -164,6 +223,7 @@ asking Lean for a goal that is not ready yet."
     (with-current-buffer source
       (let ((was-processing (lean-info--processing-at-point-p)))
         (setq lean-info--processing-ranges processing)
+        (lean-info--schedule-processing-marker-refresh)
         (when (and lean-info--active
                    (eq source lean-info--displayed-source))
           (if (lean-info--processing-at-point-p)
@@ -273,7 +333,11 @@ interactive widget protocol."
   "Tear down the Info View session owned by the current source buffer."
   (when (timerp lean-info--update-timer)
     (cancel-timer lean-info--update-timer))
+  (when (timerp lean-info--processing-marker-timer)
+    (cancel-timer lean-info--processing-marker-timer))
+  (lean-info--clear-processing-markers)
   (setq lean-info--update-timer nil
+        lean-info--processing-marker-timer nil
         lean-info--last-request-time nil
         lean-info--last-position nil
         lean-info--last-modified-tick nil
