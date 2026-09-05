@@ -34,6 +34,12 @@
   "Update the Info View with Lean's file elaboration progress."
   (lean-info-handle-file-progress (plist-get textDocument :uri) processing))
 
+(cl-defmethod eglot-handle-notification :after
+  ((_server lean-eglot-lsp-server) (_method (eql textDocument/publishDiagnostics))
+   &key uri diagnostics &allow-other-keys)
+  "Show Lean diagnostics for the current line in the Info View."
+  (lean-info-handle-diagnostics uri diagnostics))
+
 (defun lean-eglot-server-class-init (&optional _interactive)
   "Return the Lean Eglot server class and command."
   (list 'lean-eglot-lsp-server "lake" "serve"))

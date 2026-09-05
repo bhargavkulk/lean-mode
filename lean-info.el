@@ -48,6 +48,12 @@ previous position before the next throttled request is sent.")
 The value is `:unknown' until Lean sends its first `$/lean/fileProgress'
 notification.  An empty vector means the whole file is ready.")
 
+(defvar-local lean-info--diagnostics []
+  "Latest diagnostics published by Lean for this source buffer.")
+
+(defvar-local lean-info--last-goal-text nil
+  "Most recently rendered goal or processing text for this source buffer.")
+
 (defvar-local lean-info--active nil
   "Non-nil while this source buffer owns an active Info View session.")
 
@@ -74,6 +80,31 @@ notification.  An empty vector means the whole file is ready.")
           "No Goal")
       (or (plist-get result :rendered) "No Goal"))))
 
+(defun lean-info--diagnostic-text ()
+  "Return Lean diagnostics whose range starts on the current line."
+  (let ((line (1- (line-number-at-pos))))
+    (mapconcat
+     (lambda (diagnostic)
+       (let* ((severity (pcase (plist-get diagnostic :severity)
+                          (1 "error") (2 "warning")
+                          (3 "information") (4 "hint")
+                          (_ "error")))
+              (message (string-remove-suffix "\n" (plist-get diagnostic :message))))
+         (format "%s:\n%s" severity message)))
+     (seq-filter
+      (lambda (diagnostic)
+        (= line (plist-get (plist-get (plist-get diagnostic :range) :start)
+                            :line)))
+      (append lean-info--diagnostics nil))
+     "\n\n")))
+
+(defun lean-info--contents (goal-text)
+  "Append the current line's Lean diagnostics to GOAL-TEXT."
+  (let ((diagnostics (lean-info--diagnostic-text)))
+    (if (string-empty-p diagnostics)
+        goal-text
+      (concat goal-text "\n\n" diagnostics))))
+
 (defun lean-info--render (source revision result)
   "Render RESULT for SOURCE when it belongs to the current REVISION."
   (when (buffer-live-p source)
@@ -81,24 +112,26 @@ notification.  An empty vector means the whole file is ready.")
       (when (and lean-info--active
                  (= revision lean-info--update-revision)
                  (buffer-live-p lean-info--buffer))
-        (with-current-buffer lean-info--buffer
-          (let ((goal-text (lean-info--goal-text result)))
-            (unless (equal (buffer-string) goal-text)
-              (let ((inhibit-read-only t)
-                    (point (point))
-                    (window-starts
-                     (mapcar (lambda (window)
-                               (cons window (window-start window)))
-                             (get-buffer-window-list lean-info--buffer nil t))))
-                (erase-buffer)
-                (insert goal-text)
-                (goto-char (min point (point-max)))
-                (dolist (window-start window-starts)
-                  (when (window-live-p (car window-start))
-                    (set-window-start (car window-start)
-                                      (min (cdr window-start) (point-max)) t)))
-                (font-lock-flush))))
-        (setq lean-info--displayed-source source))))))
+        (let ((goal-text (lean-info--goal-text result)))
+          (setq lean-info--last-goal-text goal-text)
+          (let ((contents (lean-info--contents goal-text)))
+            (with-current-buffer lean-info--buffer
+              (unless (equal (buffer-string) contents)
+                (let ((inhibit-read-only t)
+                      (point (point))
+                      (window-starts
+                       (mapcar (lambda (window)
+                                 (cons window (window-start window)))
+                               (get-buffer-window-list lean-info--buffer nil t))))
+                  (erase-buffer)
+                  (insert contents)
+                  (goto-char (min point (point-max)))
+                  (dolist (window-start window-starts)
+                    (when (window-live-p (car window-start))
+                      (set-window-start (car window-start)
+                                        (min (cdr window-start) (point-max)) t)))
+                  (font-lock-flush))))))
+        (setq lean-info--displayed-source source)))))
 
 (defun lean-info--clear (source revision)
   "Clear SOURCE's Info View when REVISION is still current."
@@ -136,6 +169,17 @@ asking Lean for a goal that is not ready yet."
               (lean-info--show-processing)
             (when was-processing
               (lean-info--schedule-update))))))))
+
+(defun lean-info-handle-diagnostics (uri diagnostics)
+  "Refresh URI's Info View with Lean DIAGNOSTICS for the current line."
+  (when-let* ((source (find-buffer-visiting (eglot-uri-to-path uri))))
+    (with-current-buffer source
+      (setq lean-info--diagnostics diagnostics)
+      (when (and lean-info--active
+                 (eq source lean-info--displayed-source)
+                 lean-info--last-goal-text)
+        (lean-info--render source (cl-incf lean-info--update-revision)
+                           `(:rendered ,lean-info--last-goal-text))))))
 
 (defun lean-info--async-request (server method params success-fn error-fn)
   "Request METHOD from SERVER without blocking Emacs.
@@ -228,7 +272,9 @@ interactive widget protocol."
         lean-info--last-request-time nil
         lean-info--last-position nil
         lean-info--last-modified-tick nil
-        lean-info--processing-ranges :unknown)
+        lean-info--processing-ranges :unknown
+        lean-info--diagnostics []
+        lean-info--last-goal-text nil)
   (remove-hook 'post-command-hook #'lean-info--update-if-needed t)
   (remove-hook 'kill-buffer-hook #'lean-info--cleanup t)
   (remove-hook 'eglot-managed-mode-hook #'lean-info--eglot-shutdown-cleanup t)
