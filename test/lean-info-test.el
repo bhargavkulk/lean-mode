@@ -41,6 +41,9 @@
     (with-current-buffer lean-info--buffer
       (should (equal (buffer-string) "No Goal")))))
 
+(ert-deftest lean-info-uses-rendered-text-without-a-goals-field ()
+  (should (equal (lean-info--goal-text '(:rendered "no goals")) "no goals")))
+
 (ert-deftest lean-info-does-not-redraw-unchanged-goals ()
   (lean-info-test-with-source
     (with-current-buffer lean-info--buffer

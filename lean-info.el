@@ -20,11 +20,12 @@
   "The shared Lean Info View buffer.")
 
 (defvar lean-info--update-revision 0
-  "Revision of the newest scheduled Info View update.
+  "Monotonically increasing revision of the newest Info View state.
 
-Each request captures this revision.  Its result is rendered only while it
-still equals this value, so a cursor move or edit invalidates results for the
-previous position before the next throttled request is sent.")
+Each position change, edit, or processing-state update increments this value.
+Every asynchronous goal request captures the value current when it is sent;
+its response is rendered only if it still matches this variable.  Thus, a
+newer state invalidates a delayed response for an earlier position.")
 
 (defvar lean-info--displayed-source nil
   "Source buffer whose goals are currently displayed in the Info View.")
@@ -82,7 +83,7 @@ notification.  An empty vector means the whole file is ready.")
 
 (defun lean-info--ensure-buffer ()
   "Return the shared Info View buffer, creating it when necessary."
-  (unless (buffer-live-p lean-info--buffer)
+  (when (not (buffer-live-p lean-info--buffer))
     (setq lean-info--buffer (get-buffer-create "*Lean Info*"))
     (with-current-buffer lean-info--buffer
       (lean-info-mode)))
@@ -90,12 +91,11 @@ notification.  An empty vector means the whole file is ready.")
 
 (defun lean-info--goal-text (result)
   "Return plain goal text from a `$/lean/plainGoal' RESULT."
-  (let ((goals (plist-get result :goals)))
-    (if goals
-        (if-let* ((goal-list (append goals nil)))
-            (string-join goal-list "\n\n")
-          "No Goal")
-      (or (plist-get result :rendered) "No Goal"))))
+  (if (plist-member result :goals)
+      (if-let* ((goals (append (plist-get result :goals) nil)))
+          (string-join goals "\n\n")
+        "No Goal")
+    (or (plist-get result :rendered) "No Goal")))
 
 (defun lean-info--diagnostic-text ()
   "Return Lean diagnostics whose range starts on the current line."
@@ -122,6 +122,24 @@ notification.  An empty vector means the whole file is ready.")
         goal-text
       (concat goal-text "\n\n" diagnostics))))
 
+(defun lean-info--replace-contents (contents)
+  "Replace the Info View buffer with CONTENTS, preserving visible position."
+  (when (not (equal (buffer-string) contents))
+    (let ((inhibit-read-only t)
+          (point (point))
+          (window-starts
+           (mapcar (lambda (window)
+                     (cons window (window-start window)))
+                   (get-buffer-window-list (current-buffer) nil t))))
+      (erase-buffer)
+      (insert contents)
+      (goto-char (min point (point-max)))
+      (dolist (window-start window-starts)
+        (when (window-live-p (car window-start))
+          (set-window-start (car window-start)
+                            (min (cdr window-start) (point-max)) t)))
+      (font-lock-flush))))
+
 (defun lean-info--render (source revision result)
   "Render RESULT for SOURCE when it belongs to the current REVISION."
   (when (buffer-live-p source)
@@ -133,21 +151,7 @@ notification.  An empty vector means the whole file is ready.")
           (setq lean-info--last-goal-text goal-text)
           (let ((contents (lean-info--contents goal-text)))
             (with-current-buffer lean-info--buffer
-              (unless (equal (buffer-string) contents)
-                (let ((inhibit-read-only t)
-                      (point (point))
-                      (window-starts
-                       (mapcar (lambda (window)
-                                 (cons window (window-start window)))
-                               (get-buffer-window-list lean-info--buffer nil t))))
-                  (erase-buffer)
-                  (insert contents)
-                  (goto-char (min point (point-max)))
-                  (dolist (window-start window-starts)
-                    (when (window-live-p (car window-start))
-                      (set-window-start (car window-start)
-                                        (min (cdr window-start) (point-max)) t)))
-                  (font-lock-flush))))))
+              (lean-info--replace-contents contents))))
         (setq lean-info--displayed-source source)))))
 
 (defun lean-info--clear (source revision)
@@ -182,7 +186,7 @@ notification.  An empty vector means the whole file is ready.")
     (with-current-buffer source
       (setq lean-info--processing-marker-timer nil)
       (lean-info--clear-processing-markers)
-      (unless (eq lean-info--processing-ranges :unknown)
+      (when (not (eq lean-info--processing-ranges :unknown))
         (save-excursion
           (save-restriction
             (widen)
@@ -213,7 +217,7 @@ notification.  An empty vector means the whole file is ready.")
 
 (defun lean-info--schedule-processing-marker-refresh ()
   "Coalesce a fringe refresh for the current source's processing ranges."
-  (unless (timerp lean-info--processing-marker-timer)
+  (when (not (timerp lean-info--processing-marker-timer))
     (setq lean-info--processing-marker-timer
           (run-at-time 0.1 nil #'lean-info--refresh-processing-markers
                        (current-buffer)))))
@@ -327,9 +331,9 @@ interactive widget protocol."
   (let ((position (point))
         (modified-tick (buffer-chars-modified-tick))
         (source-changed (not (eq (current-buffer) lean-info--displayed-source))))
-    (unless (and (not source-changed)
-                 (equal position lean-info--last-position)
-                 (= modified-tick lean-info--last-modified-tick))
+    (when (or source-changed
+              (not (equal position lean-info--last-position))
+              (/= modified-tick lean-info--last-modified-tick))
       (setq lean-info--last-position position
             lean-info--last-modified-tick modified-tick
             lean-info--displayed-source (current-buffer))
@@ -366,7 +370,7 @@ interactive widget protocol."
 
 (defun lean-info--eglot-shutdown-cleanup ()
   "Clean up the current source's Info View session after Eglot stops managing it."
-  (unless (eglot-managed-p)
+  (when (not (eglot-managed-p))
     (lean-info--cleanup)))
 
 (defun lean-info-auto-open ()
@@ -379,7 +383,7 @@ interactive widget protocol."
 (defun lean-info-view ()
   "Display a plain, live Info View for the current Lean buffer."
   (interactive)
-  (unless eglot--managed-mode
+  (when (not eglot--managed-mode)
     (user-error "Lean's LSP server is not connected"))
   (let ((source (current-buffer)))
     (lean-info--ensure-buffer)
