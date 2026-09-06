@@ -13,6 +13,7 @@
 (require 'fringe)
 (require 'jsonrpc)
 (require 'seq)
+(require 'subr-x)
 (require 'lean-syntax)
 
 (defvar lean-info--buffer nil
@@ -175,6 +176,29 @@ notification.  An empty vector means the whole file is ready.")
   (mapc #'delete-overlay lean-info--processing-overlays)
   (setq lean-info--processing-overlays nil))
 
+(defun lean-info--processing-line-ranges (last-line)
+  "Return merged processing line ranges, bounded by LAST-LINE.
+
+Each returned element is a cons cell whose car and cdr are the inclusive
+first and final line numbers."
+  (let (ranges merged-ranges)
+    (dolist (processing (append lean-info--processing-ranges nil))
+      (let* ((range (plist-get processing :range))
+             (start (plist-get (plist-get range :start) :line))
+             (end (plist-get (plist-get range :end) :line)))
+        (when (and (integerp start) (integerp end))
+          (let ((first-line (max 0 start))
+                (final-line (min end last-line)))
+            (when (<= first-line final-line)
+              (push (cons first-line final-line) ranges))))))
+    (dolist (range (sort ranges (lambda (left right) (< (car left) (car right)))))
+      (if (and merged-ranges
+               (<= (car range) (1+ (cdr (car merged-ranges)))))
+          (setcdr (car merged-ranges)
+                  (max (cdr (car merged-ranges)) (cdr range)))
+        (push range merged-ranges)))
+    (nreverse merged-ranges)))
+
 (defun lean-info--refresh-processing-markers (source)
   "Render SOURCE's current Lean processing ranges in its left fringe."
   (when (buffer-live-p source)
@@ -186,25 +210,22 @@ notification.  An empty vector means the whole file is ready.")
           (save-restriction
             (widen)
             (let ((last-line (1- (line-number-at-pos (point-max)))))
-              (dolist (processing (append lean-info--processing-ranges nil))
-                (let* ((range (plist-get processing :range))
-                       (start (plist-get (plist-get range :start) :line))
-                       (end (plist-get (plist-get range :end) :line)))
-                  (when (and (integerp start) (integerp end))
-                    (let ((first-line (max 0 start))
-                          (final-line (min end last-line)))
-                      (when (<= first-line final-line)
-                        (cl-loop for line from first-line to final-line
-                                 do (goto-char (point-min))
-                                 do (forward-line line)
-                                 do (let ((overlay (make-overlay (point) (point))))
-                                      (overlay-put overlay 'before-string
-                                                   (propertize "!"
-                                                               'display
-                                                               '(left-fringe
-                                                                 lean-info-processing-bar
-                                                                 lean-info-processing-fringe)))
-                                      (push overlay lean-info--processing-overlays)))))))))))))))
+              (goto-char (point-min))
+              (let ((current-line 0))
+                (dolist (range (lean-info--processing-line-ranges last-line))
+                  (forward-line (- (car range) current-line))
+                  (setq current-line (car range))
+                  (cl-loop repeat (1+ (- (cdr range) (car range)))
+                           do (let ((overlay (make-overlay (point) (point))))
+                                (overlay-put overlay 'before-string
+                                             (propertize "!"
+                                                         'display
+                                                         '(left-fringe
+                                                           lean-info-processing-bar
+                                                           lean-info-processing-fringe)))
+                                (push overlay lean-info--processing-overlays))
+                           do (forward-line 1)
+                           do (cl-incf current-line)))))))))))
 
 (defun lean-info--schedule-processing-marker-refresh ()
   "Coalesce a fringe refresh for the current source's processing ranges."

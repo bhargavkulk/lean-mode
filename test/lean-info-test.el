@@ -210,6 +210,17 @@
                              lean-info-processing-fringe)))))
       (lean-info--clear-processing-markers))))
 
+(ert-deftest lean-info-merges-processing-ranges-before-rendering-markers ()
+  (lean-info-test-with-source
+    (setq-local lean-info--processing-ranges
+                [(:range (:start (:line 1) :end (:line 2)))
+                 (:range (:start (:line 0) :end (:line 1)))])
+    (unwind-protect
+        (progn
+          (lean-info--refresh-processing-markers (current-buffer))
+          (should (= (length lean-info--processing-overlays) 3)))
+      (lean-info--clear-processing-markers))))
+
 (ert-deftest lean-info-file-progress-does-not-replace-another-source-view ()
   (lean-info-test-with-source
     (let ((first-source (current-buffer))
