@@ -93,6 +93,33 @@
     (with-current-buffer lean-info--buffer
       (should (equal (buffer-string) "current")))))
 
+(ert-deftest lean-info-pause-keeps-the-current-contents-fixed ()
+  (lean-info-test-with-source
+    (with-current-buffer lean-info--buffer
+      (lean-info-mode)
+      (let ((inhibit-read-only t))
+        (insert "pinned goal")))
+    (setq lean-info--update-revision 1)
+    (lean-info-toggle-pause)
+    (should (lean-info--paused-p))
+    (should (= lean-info--update-revision 2))
+    (lean-info--render (current-buffer) 2 '(:goals ["new goal"]))
+    (with-current-buffer lean-info--buffer
+      (should (equal (buffer-string) "pinned goal")))))
+
+(ert-deftest lean-info-unpausing-refreshes-the-current-source ()
+  (lean-info-test-with-source
+    (with-current-buffer lean-info--buffer
+      (lean-info-mode))
+    (setq lean-info--displayed-source (current-buffer))
+    (lean-info-toggle-pause)
+    (let (scheduled)
+      (cl-letf (((symbol-function 'lean-info--schedule-update)
+                 (lambda () (setq scheduled t))))
+        (lean-info-toggle-pause))
+      (should scheduled))
+    (should-not (lean-info--paused-p))))
+
 (ert-deftest lean-info-scheduling-invalidates-an-in-flight-response ()
   (lean-info-test-with-source
     (with-current-buffer lean-info--buffer

@@ -30,6 +30,9 @@ newer state invalidates a delayed response for an earlier position.")
 (defvar lean-info--displayed-source nil
   "Source buffer whose goals are currently displayed in the Info View.")
 
+(defvar-local lean-info--paused nil
+  "Non-nil when this Info View buffer keeps its current contents fixed.")
+
 (defconst lean-info-update-cooldown 0.05
   "Seconds between Info View goal requests during continuous activity.")
 
@@ -89,6 +92,11 @@ notification.  An empty vector means the whole file is ready.")
       (lean-info-mode)))
   lean-info--buffer)
 
+(defun lean-info--paused-p ()
+  "Return non-nil when the shared Info View is paused."
+  (and (buffer-live-p lean-info--buffer)
+       (buffer-local-value 'lean-info--paused lean-info--buffer)))
+
 (defun lean-info--goal-text (result)
   "Return plain goal text from a `$/lean/plainGoal' RESULT."
   (if (plist-member result :goals)
@@ -146,7 +154,8 @@ notification.  An empty vector means the whole file is ready.")
     (with-current-buffer source
       (when (and lean-info--active
                  (= revision lean-info--update-revision)
-                 (buffer-live-p lean-info--buffer))
+                 (buffer-live-p lean-info--buffer)
+                 (not (lean-info--paused-p)))
         (let ((goal-text (lean-info--goal-text result)))
           (setq lean-info--last-goal-text goal-text)
           (let ((contents (lean-info--contents goal-text)))
@@ -172,8 +181,10 @@ notification.  An empty vector means the whole file is ready.")
 
 (defun lean-info--show-processing ()
   "Render a processing indicator and invalidate any pending goal request."
-  (let ((revision (cl-incf lean-info--update-revision)))
-    (lean-info--render (current-buffer) revision '(:goals ["Processing file..."]))))
+  (when (not (lean-info--paused-p))
+    (let ((revision (cl-incf lean-info--update-revision)))
+      (lean-info--render (current-buffer) revision
+                         '(:goals ["Processing file..."])))))
 
 (defun lean-info--clear-processing-markers ()
   "Remove all Lean processing markers from the current source buffer."
@@ -278,7 +289,8 @@ interactive widget protocol."
     (with-current-buffer source
       (when (and lean-info--active
                  eglot--managed-mode
-                 (buffer-live-p lean-info--buffer))
+                 (buffer-live-p lean-info--buffer)
+                 (not (lean-info--paused-p)))
         (let ((revision (or revision
                             (cl-incf lean-info--update-revision)))
               (server (eglot-current-server))
@@ -307,7 +319,8 @@ interactive widget protocol."
 (defun lean-info--schedule-update ()
   "Request current goals now, or once at the end of the cooldown period."
   (when (and lean-info--active
-             (buffer-live-p lean-info--buffer))
+             (buffer-live-p lean-info--buffer)
+             (not (lean-info--paused-p)))
     (let* ((now (float-time))
            (revision (cl-incf lean-info--update-revision))
            (elapsed (and lean-info--last-request-time
@@ -328,18 +341,19 @@ interactive widget protocol."
 
 (defun lean-info--update-if-needed ()
   "Schedule an update after the point, source text, or displayed source changes."
-  (let ((position (point))
-        (modified-tick (buffer-chars-modified-tick))
-        (source-changed (not (eq (current-buffer) lean-info--displayed-source))))
-    (when (or source-changed
-              (not (equal position lean-info--last-position))
-              (/= modified-tick lean-info--last-modified-tick))
-      (setq lean-info--last-position position
-            lean-info--last-modified-tick modified-tick
-            lean-info--displayed-source (current-buffer))
-      (if (lean-info--processing-at-point-p)
-          (lean-info--show-processing)
-        (lean-info--schedule-update)))))
+  (when (not (lean-info--paused-p))
+    (let ((position (point))
+          (modified-tick (buffer-chars-modified-tick))
+          (source-changed (not (eq (current-buffer) lean-info--displayed-source))))
+      (when (or source-changed
+                (not (equal position lean-info--last-position))
+                (/= modified-tick lean-info--last-modified-tick))
+        (setq lean-info--last-position position
+              lean-info--last-modified-tick modified-tick
+              lean-info--displayed-source (current-buffer))
+        (if (lean-info--processing-at-point-p)
+            (lean-info--show-processing)
+          (lean-info--schedule-update))))))
 
 (defun lean-info--cleanup ()
   "Tear down the Info View session owned by the current source buffer."
@@ -378,6 +392,33 @@ interactive widget protocol."
   (when (and (derived-mode-p 'lean-mode)
              (eglot-managed-p))
     (lean-info-view)))
+
+;;;###autoload
+(defun lean-info-toggle-pause ()
+  "Toggle whether the shared Info View follows source-buffer updates.
+
+When resuming from a Lean source buffer, immediately refresh its current
+position.  When invoked from the Info View, refresh the source buffer whose
+contents were displayed before pausing."
+  (interactive)
+  (when (not (buffer-live-p lean-info--buffer))
+    (user-error "The Lean Info View is not open"))
+  (let ((source (if (and (derived-mode-p 'lean-mode) lean-info--active)
+                    (current-buffer)
+                  lean-info--displayed-source)))
+    (with-current-buffer lean-info--buffer
+      (setq-local lean-info--paused (not lean-info--paused)))
+    (if (lean-info--paused-p)
+        (progn
+          (cl-incf lean-info--update-revision)
+          (message "Lean Info updates paused"))
+      (when (buffer-live-p source)
+        (with-current-buffer source
+          (when lean-info--active
+            (if (lean-info--processing-at-point-p)
+                (lean-info--show-processing)
+              (lean-info--schedule-update)))))
+      (message "Lean Info updates resumed"))))
 
 ;;;###autoload
 (defun lean-info-view ()
