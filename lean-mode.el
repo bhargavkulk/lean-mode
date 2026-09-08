@@ -17,6 +17,7 @@
 (require 'flymake)
 (require 'project)
 (require 'lean-syntax)
+(require 'lean-info)
 
 (require 'lean-indent)
 (require 'lean-input)
@@ -26,6 +27,18 @@
 
 (defclass lean-eglot-lsp-server (eglot-lsp-server) nil
   :documentation "Eglot server class for Lean.")
+
+(cl-defmethod eglot-handle-notification
+  ((_server lean-eglot-lsp-server) (_method (eql $/lean/fileProgress))
+   &key textDocument processing &allow-other-keys)
+  "Update the Info View with Lean's file elaboration progress."
+  (lean-info-handle-file-progress (plist-get textDocument :uri) processing))
+
+(cl-defmethod eglot-handle-notification :after
+  ((_server lean-eglot-lsp-server) (_method (eql textDocument/publishDiagnostics))
+   &key uri diagnostics &allow-other-keys)
+  "Show Lean diagnostics for the current line in the Info View."
+  (lean-info-handle-diagnostics uri diagnostics))
 
 (defun lean-eglot-server-class-init (&optional _interactive)
   "Return the Lean Eglot server class and command."
@@ -76,6 +89,7 @@ file, recompiling, and reloading all imports."
     (eglot-ensure)))
 
 (add-hook 'lean-mode-hook #'lean-eglot-ensure)
+(add-hook 'eglot-managed-mode-hook #'lean-info-auto-open)
 
 (provide 'lean-mode)
 ;;; lean-mode.el ends here

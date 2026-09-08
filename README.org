@@ -14,8 +14,7 @@ issue in this repo.
 
 * Requirements
 
-- Emacs 29.1 or newer;
-- Eglot (included with Emacs 29+); and
+- Emacs 29.1 or newer; and
 - a Lean project using Lake, with ~lake~ available on ~PATH~.
 
 * Installation
